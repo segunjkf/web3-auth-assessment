@@ -12,8 +12,8 @@ terraform {
 }
 
 provider "google" {
-  project = "playground-s-11-cf043f97"
-  region  = "us-central1"
+  project = var.project_id
+  region  = var.region
 }
 
 data "google_client_config" "current" {}

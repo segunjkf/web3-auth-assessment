@@ -48,12 +48,12 @@ resource "helm_release" "haproxy_ingress" {
 
   # Enabling header-based session stickiness
   set {
-    name  = "controller.config.affinity"
+    name  = "controller.config.cookie-persistence"
     value = "cookie"
   }
 
   set {
-    name  = "controller.config.balance-algorithm"
+    name  = "controller.config.load-balance"
     value = "leastconn"
   }
 }

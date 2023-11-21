@@ -1,13 +1,13 @@
 resource "google_compute_router" "router" {
   name    = "router"
-  region  = "us-central1"
+  region  = var.region
   network = google_compute_network.vpc-network.id
 }
 
 resource "google_compute_router_nat" "nat" {
   name   = "nat"
   router = google_compute_router.router.name
-  region = "us-central1"
+  region = var.region
 
   source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
   nat_ip_allocate_option             = "MANUAL_ONLY"

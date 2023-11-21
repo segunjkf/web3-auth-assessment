@@ -1,6 +1,6 @@
 resource "google_container_cluster" "primary" {
   name                     = "primary"
-  location                 = "us-central1"
+  location                 = var.region
   remove_default_node_pool = true
   initial_node_count       = 1
   network                  = google_compute_network.vpc-network.self_link
@@ -25,7 +25,7 @@ resource "google_container_cluster" "primary" {
   }
 
   workload_identity_config {
-    workload_pool = "playground-s-11-cf043f97.svc.id.goog"
+    workload_pool = "${var.project_id}.svc.id.goog"
   }
 
   ip_allocation_policy {
