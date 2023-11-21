@@ -1,178 +1,24 @@
+# Namespace configuration for Cassandra
 resource "kubernetes_namespace" "cassandra" {
   metadata {
     name = var.namespace
   }
 }
 
-resource "kubernetes_service" "cassandra" {
+# Secret configuration for Cassandra admin credentials
+resource "kubernetes_secret" "cassandra_admin_secret" {
   metadata {
-    name      = var.cassandra_name
+    name      = "cassandra-admin-secret"
     namespace = var.namespace
-    labels    = { app = "${var.cassandra_name}" }
   }
-  spec {
-    port {
-      name        = "intra"
-      port        = 7000
-      target_port = "7000"
-    }
-    port {
-      name        = "tls"
-      port        = 7001
-      target_port = "7001"
-    }
-    port {
-      name        = "jmx"
-      port        = 7199
-      target_port = "7199"
-    }
-    port {
-      name        = "cql"
-      port        = 9042
-      target_port = "9042"
-    }
-    port {
-      name        = "thrift"
-      port        = 9160
-      target_port = "9160"
-    }
-    selector   = { app = "${var.cassandra_name}" }
-    cluster_ip = "None"
-    type       = "ClusterIP"
+
+  data = {
+    "username" = base64encode("cassandra-admin")
+    "password" = base64encode("cassandra-admin-password")
   }
 }
 
-resource "kubernetes_stateful_set" "cassandra" {
-  metadata {
-    name      = var.cassandra_name
-    namespace = var.namespace
-    labels    = { app = "${var.cassandra_name}" }
-  }
-  spec {
-    replicas = var.cluster_size
-    selector {
-      match_labels = { app = "${var.cassandra_name}" }
-    }
-    template {
-      metadata {
-        labels = { app = "${var.cassandra_name}" }
-      }
-      spec {
-        container {
-          name  = var.cassandra_name
-          image = "cassandra:3.11.3"
-          port {
-            name           = "intra"
-            container_port = 7000
-          }
-          port {
-            name           = "tls"
-            container_port = 7001
-          }
-          port {
-            name           = "jmx"
-            container_port = 7199
-          }
-          port {
-            name           = "cql"
-            container_port = 9042
-          }
-          port {
-            name           = "thrift"
-            container_port = 9160
-          }
-          env {
-            name  = "CASSANDRA_SEEDS"
-            value = "${var.cassandra_name}-0.${var.cassandra_name}.${var.namespace}.svc.cluster.local,${var.cassandra_name}-1.${var.cassandra_name}.${var.namespace}.svc.cluster.local"
-          }
-          env {
-            name  = "MAX_HEAP_SIZE"
-            value = "2048M"
-          }
-          env {
-            name  = "HEAP_NEWSIZE"
-            value = "512M"
-          }
-          env {
-            name  = "CASSANDRA_ENDPOINT_SNITCH"
-            value = "SimpleSnitch"
-          }
-          env {
-            name  = "CASSANDRA_CLUSTER_NAME"
-            value = "cassandra"
-          }
-          env {
-            name  = "CASSANDRA_DC"
-            value = "DC1"
-          }
-          env {
-            name  = "CASSANDRA_RACK"
-            value = "RAC1"
-          }
-          env {
-            name  = "CASSANDRA_START_RPC"
-            value = "false"
-          }
-          env {
-            name = "POD_IP"
-            value_from {
-              field_ref {
-                field_path = "status.podIP"
-              }
-            }
-          }
-          volume_mount {
-            name       = "data"
-            mount_path = "/var/lib/cassandra"
-          }
-          liveness_probe {
-            exec {
-              command = ["/bin/sh", "-c", "nodetool status"]
-            }
-            initial_delay_seconds = 90
-            timeout_seconds       = 5
-            period_seconds        = 30
-            success_threshold     = 1
-            failure_threshold     = 3
-          }
-          readiness_probe {
-            exec {
-              command = ["/bin/sh", "-c", "nodetool status | grep -E \"^UN\\s+$${POD_IP}\""]
-            }
-            initial_delay_seconds = 90
-            timeout_seconds       = 5
-            period_seconds        = 30
-            success_threshold     = 1
-            failure_threshold     = 3
-          }
-          image_pull_policy = "IfNotPresent"
-        }
-        termination_grace_period_seconds = 30
-      }
-    }
-    volume_claim_template {
-      metadata {
-        name   = "data"
-        labels = { app = "${var.cassandra_name}" }
-      }
-      spec {
-        access_modes       = ["ReadWriteOnce"]
-        storage_class_name = var.storage_class_name
-        resources {
-          requests = { storage = "${var.storage_size}" }
-        }
-      }
-    }
-    service_name          = var.cassandra_name
-    pod_management_policy = "OrderedReady"
-    update_strategy {
-      type = "RollingUpdate"
-    }
-  }
-  depends_on = [kubernetes_namespace.cassandra]
-}
-
-// Set-up HAproxy Ingress
+# HAproxy Ingress configuration
 resource "helm_release" "haproxy_ingress" {
   name             = "haproxy-ingress"
   repository       = "https://haproxytech.github.io/helm-charts"
@@ -199,5 +45,69 @@ resource "helm_release" "haproxy_ingress" {
     name  = "controller.stats.port"
     value = "1024"
   }
+
+  # Enabling header-based session stickiness
+  set {
+    name  = "controller.config.affinity"
+    value = "cookie"
+  }
+
+  set {
+    name  = "controller.config.balance-algorithm"
+    value = "leastconn"
+  }
 }
 
+# Cert Manager configuration for TLS certificates
+resource "helm_release" "cert_manager" {
+  name             = "cert-manager"
+  repository       = "https://charts.jetstack.io"
+  chart            = "cert-manager"
+  namespace        = "cert-manager"
+  create_namespace = true
+
+  set {
+    name  = "installCRDs"
+    value = "true"
+  }
+}
+
+# K8ssandra Operator for managing Cassandra
+resource "helm_release" "k8ssandra_operator" {
+  name             = "k8ssandra-operator"
+  repository       = "https://helm.k8ssandra.io/stable"
+  chart            = "k8ssandra/k8ssandra-operator"
+  namespace        = "k8ssandra-operator"
+  create_namespace = true
+
+  set {
+    name  = "global.clusterScoped"
+    value = "true"
+  }
+
+  set {
+    name  = "controlPlane"
+    value = "false"
+  }
+
+  values = [<<EOF
+  cassandra:
+    auth:
+      superuser:
+        secret: cassandra-admin-secret
+    cassandraLibDirVolume:
+      storageClass: standard-rwo
+    clusterName: mixed-workload
+    datacenters:
+    - name: dc1
+      size: 3
+      racks:
+      - name: rack1
+        affinityLabels:
+          failure-domain.beta.kubernetes.io/zone: us-central1-a
+      - name: rack2
+        affinityLabels:
+          failure-domain.beta.kubernetes.io/zone: us-central1-b
+  EOF
+  ]
+}
