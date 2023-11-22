@@ -89,7 +89,7 @@ resource "helm_release" "k8ssandra_operator" {
     name  = "controlPlane"
     value = "false"
   }
-
+// Create cassandra mutli zone cluster
   values = [<<EOF
   cassandra:
     auth:
@@ -104,10 +104,10 @@ resource "helm_release" "k8ssandra_operator" {
       racks:
       - name: rack1
         affinityLabels:
-          failure-domain.beta.kubernetes.io/zone: us-central1-a
+          topology.kubernetes.io/zone: us-central1-a
       - name: rack2
         affinityLabels:
-          failure-domain.beta.kubernetes.io/zone: us-central1-b
+          topology.kubernetes.io/zone: us-central1-b
   EOF
   ]
   depends_on = [ kubernetes_namespace.cassandra ]
