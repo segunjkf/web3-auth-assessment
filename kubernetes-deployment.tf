@@ -16,6 +16,7 @@ resource "kubernetes_secret" "cassandra_admin_secret" {
     "username" = base64encode("cassandra-admin")
     "password" = base64encode("cassandra-admin-password")
   }
+  depends_on = [ kubernetes_namespace.cassandra ]
 }
 
 # HAproxy Ingress configuration
@@ -77,8 +78,7 @@ resource "helm_release" "k8ssandra_operator" {
   name             = "k8ssandra-operator"
   repository       = "https://helm.k8ssandra.io/stable"
   chart            = "k8ssandra/k8ssandra-operator"
-  namespace        = "k8ssandra-operator"
-  create_namespace = true
+  namespace        = var.namespace
 
   set {
     name  = "global.clusterScoped"
@@ -110,4 +110,5 @@ resource "helm_release" "k8ssandra_operator" {
           failure-domain.beta.kubernetes.io/zone: us-central1-b
   EOF
   ]
+  depends_on = [ kubernetes_namespace.cassandra ]
 }
