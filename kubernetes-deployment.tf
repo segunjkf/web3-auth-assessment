@@ -5,20 +5,6 @@ resource "kubernetes_namespace" "cassandra" {
   }
 }
 
-# Secret configuration for Cassandra admin credentials
-resource "kubernetes_secret" "cassandra_admin_secret" {
-  metadata {
-    name      = "cassandra-admin-secret"
-    namespace = var.namespace
-  }
-
-  data = {
-    "username" = base64encode("cassandra-admin")
-    "password" = base64encode("cassandra-admin-password")
-  }
-  depends_on = [ kubernetes_namespace.cassandra ]
-}
-
 # HAproxy Ingress configuration
 resource "helm_release" "haproxy_ingress" {
   name             = "haproxy-ingress"
@@ -77,8 +63,8 @@ resource "helm_release" "cert_manager" {
 resource "helm_release" "k8ssandra_operator" {
   name             = "k8ssandra-operator"
   repository       = "https://helm.k8ssandra.io/stable"
-  chart            = "k8ssandra/k8ssandra-operator"
-  namespace        = var.namespace
+  chart            = "k8ssandra-operator"
+  create_namespace = true
 
   set {
     name  = "global.clusterScoped"
@@ -89,26 +75,98 @@ resource "helm_release" "k8ssandra_operator" {
     name  = "controlPlane"
     value = "false"
   }
+  depends_on = [ helm_release.cert_manager ]
+}
+
 // Create cassandra mutli zone cluster
-  values = [<<EOF
+resource "kubectl_manifest" "cassandra" {
+    yaml_body = <<YAML
+apiVersion: k8ssandra.io/v1alpha1
+kind: K8ssandraCluster
+metadata:
+  name: cassandra
+  namespace: "${var.namespace}"
+spec:
   cassandra:
-    auth:
-      superuser:
-        secret: cassandra-admin-secret
-    cassandraLibDirVolume:
-      storageClass: standard-rwo
-    clusterName: mixed-workload
+    serverVersion: "3.11.14"
+    storageConfig:
+      cassandraDataVolumeClaimSpec:
+        storageClassName: standard
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+    telemetry:
+      vector:
+        enabled: true
+        components:
+          transforms:
+            - name: my-transform
+              type: remap
+              inputs:
+                - cassandra_metrics
+              config: |-
+                source = ".tags.host = get_hostname!()"
+          sinks:
+            - name: console
+              inputs:
+                - my-transform
+              type: console
+              config: |-
+                [sinks.console.encoding]
+                codec = "json"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+    config:
+      cassandraYaml:
+        auto_snapshot: false
+        memtable_flush_writers: 1
+        commitlog_segment_size_in_mb: 2
+        concurrent_compactors: 1
+        compaction_throughput_mb_per_sec: 0
+        sstable_preemptive_open_interval_in_mb: 0
+        key_cache_size_in_mb: 0
+        thrift_prepared_statements_cache_size_mb: 1
+        prepared_statements_cache_size_mb: 1
+        slow_query_log_timeout_in_ms: 0
+        cas_contention_timeout_in_ms: 10000
+        counter_write_request_timeout_in_ms: 10000
+        range_request_timeout_in_ms: 10000
+        read_request_timeout_in_ms: 10000
+        request_timeout_in_ms: 10000
+        truncate_request_timeout_in_ms: 60000
+        write_request_timeout_in_ms: 10000
+        counter_cache_size_in_mb: 0
+        concurrent_reads: 2
+        concurrent_writes: 2
+        concurrent_counter_writes: 2
+      jvmOptions:
+        heapSize: 512Mi
+        heapNewGenSize: 256Mi
+        gc: CMS
+    networking:
+      hostNetwork: true
+    mgmtAPIHeap: 64Mi
     datacenters:
-    - name: dc1
-      size: 3
-      racks:
-      - name: rack1
-        affinityLabels:
-          topology.kubernetes.io/zone: us-central1-a
-      - name: rack2
-        affinityLabels:
-          topology.kubernetes.io/zone: us-central1-b
-  EOF
-  ]
-  depends_on = [ kubernetes_namespace.cassandra ]
+      - metadata:
+          name: dc1
+        k8sContext: kind-k8ssandra-0
+        size: 2
+        racks:
+          - name: rack1
+            nodeAffinityLabels:
+              "topology.kubernetes.io/zone": us-central1-a
+          - name: rack2
+            nodeAffinityLabels:
+              "topology.kubernetes.io/zone": us-central1-b
+      
+YAML
+
+depends_on = [ helm_release.k8ssandra_operator ]
 }
