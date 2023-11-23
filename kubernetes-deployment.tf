@@ -73,7 +73,7 @@ resource "helm_release" "k8ssandra_operator" {
 
   set {
     name  = "controlPlane"
-    value = "false"
+    value = "true"
   }
   depends_on = [ helm_release.cert_manager ]
 }
@@ -156,7 +156,6 @@ spec:
     datacenters:
       - metadata:
           name: dc1
-        k8sContext: kind-k8ssandra-0
         size: 2
         racks:
           - name: rack1

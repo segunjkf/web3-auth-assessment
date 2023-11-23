@@ -11,5 +11,6 @@ variable "region" {
 variable "project_id" {
   description = "The project in which to hold the components"
   type        = string
-  default     = "playground-s-11-cf043f97"
+  default     = "web3-auth-405822"
 }
+
